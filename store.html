@@ -62,6 +62,21 @@
     margin-bottom: 20px;
   }
 
+  /* The panel is position:fixed, so the page behind it can't scroll — the
+     form has to scroll inside itself, or a tall photo preview pushes the
+     submit button off-screen with no way to reach it. */
+  #add-product-panel .new-request {
+    max-height: calc(100dvh - 120px);
+    overflow-y: auto;
+  }
+  #prod-image-preview {
+    width: 100%;
+    max-height: 220px;
+    object-fit: contain;
+    background: var(--pill);
+    margin-bottom: 10px;
+  }
+
   @media (max-width: 600px) {
     .store-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
     .store-hero { padding: 26px 20px; border-radius: 14px; }

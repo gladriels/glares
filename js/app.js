@@ -39,7 +39,7 @@ async function loadFeed() {
 
   const requestsQuery = supabase
     .from("requests")
-    .select("id, title, description, budget, category, audience, spotify_url, image_url, image_width, image_height, is_sponsored, is_staff_pick, staff_pick_rank, user_id, created_at, profiles!requests_user_id_fkey(username, avatar_url)")
+    .select("id, title, description, budget, category, audience, spotify_url, image_url, image_width, image_height, is_sponsored, is_staff_pick, staff_pick_rank, found_recommendation_id, user_id, created_at, profiles!requests_user_id_fkey(username, avatar_url)")
     .eq("status", "open")
     .order("is_sponsored", { ascending: false })
     .order("created_at", { ascending: false });
@@ -319,6 +319,7 @@ function renderFeed() {
     <div class="ticket-wrap">
       <a href="request.html#${r.id}" class="ticket${r.spotify_url ? " has-spotify" : ""}${r.image_url ? "" : " ticket-text-only"}" data-id="${r.id}"${r.spotify_url ? ` data-spotify="${escapeHtml(r.spotify_url)}"` : ""}${r.image_url ? ` style="--post-image: url('${escapeHtml(r.image_url)}')"` : ""}>
         ${r.is_sponsored ? `<span class="sponsored-badge">★ Sponsored</span>` : ""}
+        ${r.found_recommendation_id && !r.is_sponsored ? `<span class="found-badge found-badge-card">${ICONS.check}<span>Found</span></span>` : ""}
         ${renderTicketMedia(r, likeButtonHtml)}
         ${ticketFooterHtml(r)}
       </a>

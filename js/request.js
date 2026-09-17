@@ -73,7 +73,7 @@ async function loadRequest() {
   const [{ data: r, error }, { data: likes }, user] = await Promise.all([
     supabase
       .from("requests")
-      .select("id, title, description, budget, category, spotify_url, image_url, image_width, image_height, is_sponsored, created_at, user_id, profiles!requests_user_id_fkey(username, avatar_url)")
+      .select("id, title, description, budget, category, spotify_url, image_url, image_width, image_height, is_sponsored, found_recommendation_id, created_at, user_id, profiles!requests_user_id_fkey(username, avatar_url)")
       .eq("id", requestId)
       .single(),
     supabase.from("likes").select("user_id").eq("request_id", requestId),
@@ -99,7 +99,10 @@ async function loadRequest() {
 
   detail.innerHTML = `
     ${r.image_url ? `<div class="detail-image"><img src="${r.image_url}" alt=""${detailDims} decoding="async"><button type="button" class="like-btn${isLiked ? " is-liked" : ""}" id="detail-like-btn" aria-label="Like">${ICONS.heart}<span class="like-count">${likedBy.size ? likedBy.size : ""}</span></button></div>` : ""}
-    ${r.category ? `<span class="ticket-cat">${r.category}</span>` : ""}
+    <div class="request-tags">
+      <span class="found-badge found-badge-lg" id="request-found-badge"${r.found_recommendation_id ? "" : " hidden"}>${ICONS.check}<span>Found</span></span>
+      ${r.category ? `<span class="ticket-cat">${r.category}</span>` : ""}
+    </div>
     ${r.title ? `<h1>${escapeHtml(r.title)}</h1>` : ""}
     <p>${escapeHtml(r.description ?? "")}</p>
     ${embed ? `<div class="spotify-player-shell" data-track-player><div id="request-spotify-player"></div><button class="spotify-play-hint" type="button" data-play-spotify>Tap to play on Spotify</button><iframe class="spotify-embed-fallback" src="${embed}" width="100%" height="152" frameborder="0" allow="encrypted-media"></iframe></div>` : ""}
@@ -363,16 +366,22 @@ async function loadRecommendations() {
   const isOwner = user && currentRequest && user.id === currentRequest.user_id;
   const isAdmin = profile?.is_admin === true;
 
+  // "Found" is one recommendation per post — the one that actually helped.
+  // Older posts may still have a favorite from before, so either marker counts.
+  const foundId = currentRequest?.found_recommendation_id ?? null;
+  const helped = (rec) => foundId ? rec.id === foundId : rec.is_favorite === true;
+
   list.innerHTML = recs.map(rec => `
-    <div class="rec-card ${rec.is_favorite ? "is-favorite" : ""}">
-      ${rec.is_favorite ? `<span class="rec-favorite-badge">★ Favorite</span>` : ""}
+    <div class="rec-card ${helped(rec) ? "is-favorite" : ""}">
+      ${helped(rec) ? `<span class="rec-favorite-badge">${ICONS.check} This helped</span>` : ""}
       ${rec.image_url ? `<div class="rec-image"><img src="${rec.image_url}" alt=""${rec.image_width && rec.image_height ? ` width="${rec.image_width}" height="${rec.image_height}"` : ""} loading="lazy" decoding="async"></div>` : ""}
       <p class="rec-note">${escapeHtml(rec.note)}</p>
       ${rec.link ? `<a class="rec-link" href="${escapeHtml(rec.link)}" target="_blank" rel="noopener">${escapeHtml(rec.link)}</a>` : ""}
       <div class="rec-footer">
         <span class="ticket-author">${rec.profiles?.avatar_url ? `<img src="${rec.profiles.avatar_url}" class="mini-avatar" width="36" height="36" loading="lazy" decoding="async">` : `<span class="mini-avatar mini-avatar-empty"></span>`}${rec.profiles?.username ?? "someone"}</span>
         <span class="rec-actions">
-          ${isOwner && !rec.is_favorite ? `<button class="fav-btn" data-id="${rec.id}">Mark favorite</button>` : ""}
+          ${isOwner && !helped(rec) ? `<button class="fav-btn" data-found="${rec.id}" title="Mark your post as found with this recommendation">This helped</button>` : ""}
+          ${isOwner && helped(rec) ? `<button class="fav-btn fav-btn-undo" data-found="">Undo</button>` : ""}
           ${user && (user.id === rec.user_id || isAdmin) ? `<button class="delete-rec-btn" data-id="${rec.id}">Delete</button>` : ""}
         </span>
       </div>
@@ -389,13 +398,18 @@ async function loadRecommendations() {
   });
 
   if (isOwner) {
-    document.querySelectorAll(".fav-btn").forEach(btn => {
+    document.querySelectorAll("[data-found]").forEach(btn => {
       btn.addEventListener("click", async () => {
-        const { error } = await supabase
-          .from("recommendations")
-          .update({ is_favorite: true })
-          .eq("id", btn.dataset.id);
-        if (error) { alert("Couldn't mark favorite: " + error.message); return; }
+        const recommendationId = btn.dataset.found || null;
+        btn.disabled = true;
+        const { error } = await supabase.rpc("set_request_found", {
+          p_request_id: currentRequest.id,
+          p_recommendation_id: recommendationId
+        });
+        if (error) { btn.disabled = false; alert("Couldn't update: " + error.message); return; }
+        currentRequest.found_recommendation_id = recommendationId;
+        const badge = document.getElementById("request-found-badge");
+        if (badge) badge.hidden = !recommendationId;
         loadRecommendations();
       });
     });

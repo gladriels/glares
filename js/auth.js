@@ -159,18 +159,259 @@ function openAvatarCropper(file, onCrop) {
   modal.querySelector("[data-save]").onclick = () => { const size = 512, canvas = document.createElement("canvas"); canvas.width = canvas.height = size; const frameSize = frame.clientWidth, naturalRatio = image.naturalWidth / image.naturalHeight; const base = naturalRatio >= 1 ? frameSize / image.naturalHeight : frameSize / image.naturalWidth; const rendered = base * scale; canvas.getContext("2d").drawImage(image, ((frameSize - image.naturalWidth * rendered) / 2 + x) * size / frameSize, ((frameSize - image.naturalHeight * rendered) / 2 + y) * size / frameSize, image.naturalWidth * rendered * size / frameSize, image.naturalHeight * rendered * size / frameSize); canvas.toBlob(blob => { onCrop(new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" })); URL.revokeObjectURL(source); modal.remove(); }, "image/jpeg", .9); };
 }
 
-function openProfileModal(user, currentUsername, currentAvatar) {
-  let modal = document.getElementById("profile-modal"); if (modal) modal.remove();
-  modal = document.createElement("div"); modal.id = "profile-modal"; modal.className = "new-request-panel open";
-  modal.innerHTML = `<section class="new-request"><button class="panel-close" id="profile-close-btn">&times;</button><h2>Edit profile</h2><div class="field-row"><img id="avatar-preview" src="${currentAvatar || ''}" class="avatar-preview ${currentAvatar ? '' : 'avatar-preview-empty'}" /></div><div class="field-row"><label class="upload-label" for="avatar-file"><span>Change photo</span></label><input type="file" id="avatar-file" accept="image/*" style="display:none;" /></div><div class="field-row"><input type="text" id="profile-username" value="${currentUsername || ''}" placeholder="username" /></div><button id="profile-save-btn" class="btn">Save</button></section>`;
-  document.body.appendChild(modal); modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); }); document.getElementById("profile-close-btn").onclick = () => modal.remove();
-  let pendingFile = null;
-  document.getElementById("avatar-file").onchange = e => { const file = e.target.files[0]; if (!file) return; openAvatarCropper(file, cropped => { pendingFile = cropped; const preview = document.getElementById("avatar-preview"); preview.src = URL.createObjectURL(cropped); preview.classList.remove("avatar-preview-empty"); }); };
-  document.getElementById("profile-save-btn").onclick = async () => { const username = document.getElementById("profile-username").value.trim(), updates = {}; if (username) updates.username = username; try { if (pendingFile) updates.avatar_url = await uploadAvatar(user, pendingFile); if (Object.keys(updates).length) { const { error } = await supabase.from("profiles").update(updates).eq("id", user.id); if (error) throw error; } invalidateMyProfile(); modal.remove(); renderAuthBar(); } catch (err) { alert("Couldn't save: " + err.message); } };
+// Loads a script once and shares the promise, for features only some pages
+// need until someone actually opens them (song search, the search overlay).
+const scriptLoads = new Map();
+function loadScriptOnce(src) {
+  if (!scriptLoads.has(src)) {
+    scriptLoads.set(src, new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = src;
+      script.onload = resolve;
+      script.onerror = () => { scriptLoads.delete(src); reject(new Error(`Couldn't load ${src}`)); };
+      document.head.appendChild(script);
+    }));
+  }
+  return scriptLoads.get(src);
 }
+
+// Mirrors the database rules in guard_profile_privileges() so people see the
+// problem as they type rather than after pressing Save.
+const RESERVED_USERNAMES = new Set([
+  "api", "css", "js", "images", "index", "profile", "profiles", "request", "requests",
+  "reel", "messages", "store", "store-item", "search", "settings", "admin", "glares",
+  "about", "help", "login", "signup", "explore", "dist", "functions", "www"
+]);
+
+function usernameProblem(name) {
+  if (name.length < 3) return "At least 3 characters.";
+  if (name.length > 30) return "30 characters max.";
+  if (!/^[a-z0-9._]+$/.test(name)) return "Only lowercase letters, numbers, dots and underscores.";
+  if (/^\.|\.$|\.\./.test(name)) return "Dots can't be at the start, the end, or doubled.";
+  if (RESERVED_USERNAMES.has(name)) return "That one's reserved — try another.";
+  return "";
+}
+
+// Accepts "@name", "name", or a pasted instagram.com link.
+function parseInstagramHandle(raw) {
+  let value = String(raw || "").trim();
+  if (!value) return "";
+  const fromUrl = value.match(/instagram\.com\/([A-Za-z0-9._]+)/i);
+  if (fromUrl) value = fromUrl[1];
+  return value.replace(/^@+/, "").replace(/\/+$/, "");
+}
+
+function friendlyProfileError(error) {
+  const message = error?.message || String(error);
+  if (/profiles_username_key|duplicate key/i.test(message)) return "That username is taken.";
+  if (/profiles_instagram_handle_format/i.test(message)) return "That doesn't look like an Instagram username.";
+  if (/profiles_bio_length/i.test(message)) return "Your bio is too long.";
+  return message;
+}
+
+function profileLinkHost() {
+  return window.location.host || "glaress.pages.dev";
+}
+
+async function openProfileModal(user) {
+  document.getElementById("profile-modal")?.remove();
+
+  const { data: me, error: loadError } = await supabase
+    .from("profiles")
+    .select("username, avatar_url, bio, instagram_handle, profile_spotify_url")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (loadError || !me) { alert("Couldn't load your profile: " + (loadError?.message || "not found")); return; }
+
+  const modal = document.createElement("div");
+  modal.id = "profile-modal";
+  modal.className = "new-request-panel open";
+  modal.innerHTML = `
+    <section class="new-request profile-edit">
+      <button class="panel-close" type="button" data-close aria-label="Close">&times;</button>
+      <h2>Edit profile</h2>
+      <div class="profile-edit-photo">
+        <img id="avatar-preview" alt="" class="avatar-preview ${me.avatar_url ? "" : "avatar-preview-empty"}" ${me.avatar_url ? `src="${me.avatar_url}"` : ""}>
+        <label class="upload-label" for="avatar-file"><span>Change photo</span></label>
+        <input type="file" id="avatar-file" accept="image/*" hidden>
+      </div>
+
+      <label class="profile-edit-label" for="profile-username">Username</label>
+      <input type="text" id="profile-username" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="30">
+      <p class="profile-link-preview" id="profile-link-preview"></p>
+
+      <label class="profile-edit-label" for="profile-bio">Bio <span class="profile-edit-count" id="profile-bio-count"></span></label>
+      <textarea id="profile-bio" rows="3" maxlength="300" placeholder="What's your taste?"></textarea>
+
+      <label class="profile-edit-label" for="profile-instagram">Instagram</label>
+      <div class="profile-edit-prefixed"><span>@</span><input type="text" id="profile-instagram" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="your.instagram"></div>
+
+      <label class="profile-edit-label" for="profile-song-search">Profile song</label>
+      <p class="profile-song-current" id="profile-song-current" hidden><span>A song is set</span><button type="button" class="link-btn" id="profile-song-remove">Remove</button></p>
+      <input type="text" id="profile-song-search" autocomplete="off" placeholder="Search for a song…">
+      <input type="hidden" id="profile-song-url">
+
+      <button type="button" id="profile-save-btn" class="btn profile-edit-save">Save</button>
+      <p class="login-status" id="profile-save-status"></p>
+    </section>`;
+  document.body.appendChild(modal);
+
+  const close = () => modal.remove();
+  modal.querySelector("[data-close]").onclick = close;
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+
+  const usernameInput = modal.querySelector("#profile-username");
+  const linkPreview = modal.querySelector("#profile-link-preview");
+  const bioInput = modal.querySelector("#profile-bio");
+  const bioCount = modal.querySelector("#profile-bio-count");
+  const igInput = modal.querySelector("#profile-instagram");
+  const songUrl = modal.querySelector("#profile-song-url");
+  const songCurrent = modal.querySelector("#profile-song-current");
+  const status = modal.querySelector("#profile-save-status");
+
+  usernameInput.value = me.username || "";
+  bioInput.value = me.bio || "";
+  igInput.value = me.instagram_handle || "";
+  songUrl.value = me.profile_spotify_url || "";
+  songCurrent.hidden = !me.profile_spotify_url;
+
+  // Availability is checked against the database a moment after typing
+  // stops; the unique constraint still has the final say on Save.
+  let usernameTaken = false;
+  let takenTimer = null;
+  let takenRun = 0;
+  const checkTaken = async (name) => {
+    const run = ++takenRun;
+    const { data } = await supabase
+      .from("profiles")
+      .select("id")
+      .ilike("username", name.replace(/[\\%_]/g, (c) => `\\${c}`))
+      .neq("id", user.id)
+      .limit(1);
+    if (run !== takenRun || usernameInput.value.trim().toLowerCase() !== name) return;
+    usernameTaken = Boolean(data?.length);
+    if (usernameTaken) {
+      linkPreview.classList.add("is-error");
+      linkPreview.textContent = "That username is taken.";
+    }
+  };
+
+  const paintUsername = () => {
+    const typed = usernameInput.value.trim();
+    // Existing names from before these rules (some have capitals) stay valid
+    // until someone actually changes them.
+    const changed = typed !== me.username;
+    const problem = changed ? usernameProblem(typed.toLowerCase()) : "";
+    usernameTaken = false;
+    takenRun++;
+    clearTimeout(takenTimer);
+    if (changed && !problem) takenTimer = setTimeout(() => checkTaken(typed.toLowerCase()), 350);
+    linkPreview.classList.toggle("is-error", Boolean(problem));
+    linkPreview.innerHTML = problem
+      ? problem
+      : `Your link: <strong>${profileLinkHost()}/${escapeHtmlText(typed || "username")}</strong>`;
+    return problem;
+  };
+  usernameInput.addEventListener("input", () => {
+    const pos = usernameInput.selectionStart;
+    const lowered = usernameInput.value.toLowerCase().replace(/\s+/g, "");
+    if (lowered !== usernameInput.value && usernameInput.value.trim() !== me.username) {
+      usernameInput.value = lowered;
+      try { usernameInput.setSelectionRange(pos, pos); } catch (_) {}
+    }
+    paintUsername();
+  });
+  paintUsername();
+
+  const paintBioCount = () => { bioCount.textContent = `${bioInput.value.length}/300`; };
+  bioInput.addEventListener("input", paintBioCount);
+  paintBioCount();
+
+  modal.querySelector("#profile-song-remove").onclick = () => {
+    songUrl.value = "";
+    songCurrent.hidden = true;
+  };
+
+  let pendingFile = null;
+  modal.querySelector("#avatar-file").onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    openAvatarCropper(file, (cropped) => {
+      pendingFile = cropped;
+      const preview = modal.querySelector("#avatar-preview");
+      preview.src = URL.createObjectURL(cropped);
+      preview.classList.remove("avatar-preview-empty");
+    });
+  };
+
+  loadScriptOnce("js/song-search.js")
+    .then(() => {
+      attachSongSearch("profile-song-search", "profile-song-url", "profile-song-results");
+      modal.querySelector("#profile-song-search").addEventListener("input", () => { songCurrent.hidden = true; });
+    })
+    .catch(() => { modal.querySelector("#profile-song-search").placeholder = "Song search is unavailable right now"; });
+
+  const saveBtn = modal.querySelector("#profile-save-btn");
+  saveBtn.onclick = async () => {
+    const typed = usernameInput.value.trim();
+    const usernameChanged = typed !== me.username;
+    if (usernameChanged && (usernameTaken || usernameProblem(typed.toLowerCase()))) { usernameInput.focus(); return; }
+
+    const instagram = parseInstagramHandle(igInput.value);
+    if (instagram && !/^[A-Za-z0-9._]{1,30}$/.test(instagram)) {
+      status.textContent = "That doesn't look like an Instagram username.";
+      return;
+    }
+
+    const updates = {
+      bio: bioInput.value.trim() || null,
+      instagram_handle: instagram || null,
+      profile_spotify_url: songUrl.value.trim() || null
+    };
+    if (usernameChanged) updates.username = typed.toLowerCase();
+
+    saveBtn.disabled = true;
+    status.textContent = "Saving…";
+    try {
+      if (pendingFile) updates.avatar_url = await uploadAvatar(user, pendingFile);
+      const { error } = await supabase.from("profiles").update(updates).eq("id", user.id);
+      if (error) throw error;
+      invalidateMyProfile();
+      close();
+      renderAuthBar();
+      window.dispatchEvent(new CustomEvent("glares:profile-updated", {
+        detail: { oldUsername: me.username, username: updates.username ?? me.username }
+      }));
+    } catch (err) {
+      status.textContent = friendlyProfileError(err);
+      saveBtn.disabled = false;
+    }
+  };
+}
+
+function escapeHtmlText(str) {
+  const div = document.createElement("div");
+  div.textContent = str ?? "";
+  return div.innerHTML;
+}
+
+async function openSearch() {
+  try {
+    await loadScriptOnce("js/search.js");
+    openSearchOverlay();
+  } catch (_) {
+    alert("Search couldn't load. Check your connection and try again.");
+  }
+}
+
+function searchButtonHtml() {
+  return `<button type="button" class="btn btn-ghost icon-btn search-open-btn" data-open-search title="Search" aria-label="Search">${ICONS.search}</button>`;
+}
+
 function renderLoginShell(bar) {
   bar.innerHTML = `
     <div class="auth-entry-actions">
+      ${searchButtonHtml()}
       <button type="button" class="btn btn-ghost" id="show-signin-btn">Sign in</button>
       <button type="button" class="btn" id="show-signup-btn">Sign up</button>
     </div>
@@ -241,6 +482,7 @@ async function renderAuthBar() {
     const profile = await getMyProfile();
 
     bar.innerHTML = `
+      ${searchButtonHtml()}
       <button id="avatar-btn" class="avatar-btn" title="${profile?.username ?? "you"}" aria-label="Your profile">
         ${profile?.avatar_url ? `<img src="${profile.avatar_url}" class="avatar-thumb" />` : `<span class="avatar-thumb avatar-thumb-empty"></span>`}
         <span class="auth-user">${profile?.username ?? "you"}</span>
@@ -250,12 +492,25 @@ async function renderAuthBar() {
     `;
     document.getElementById("signout-btn").addEventListener("click", signOut);
     document.getElementById("avatar-btn").onclick = () => { window.location.href = `profile.html#${encodeURIComponent(profile?.username ?? "")}`; };
-    document.getElementById("edit-profile-btn").onclick = () => openProfileModal(user, profile?.username, profile?.avatar_url);
+    document.getElementById("edit-profile-btn").onclick = () => openProfileModal(user);
   }
 }
 
 supabase.auth.onAuthStateChange((event) => {
   if (event === "PASSWORD_RECOVERY") openPasswordRecoveryModal();
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest("[data-open-search]")) openSearch();
+});
+
+document.addEventListener("keydown", (event) => {
+  const typing = event.target.closest?.("input, textarea, [contenteditable='true']");
+  if (typing) return;
+  if (event.key === "/" || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k")) {
+    event.preventDefault();
+    openSearch();
+  }
 });
 
 document.addEventListener("DOMContentLoaded", async () => {

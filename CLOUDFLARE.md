@@ -28,8 +28,9 @@ repo used to carry has been removed.
 | Path | Purpose |
 |---|---|
 | `functions/api/*.js` | The six server functions, in Cloudflare's format. Same routes as before (`/api/spotify-search` etc.), so the site's code is unchanged. |
+| `functions/[username].js` | Shareable profile links: `glaress.pages.dev/<username>` serves the profile page with Open Graph tags, so the link unfurls into a card in Instagram DMs, iMessage and Telegram. Pages, files and reserved words pass straight through. |
 | `lib/` | Helpers shared by those functions (Supabase client, QPay token, Web Push). Not published. |
-| `scripts/build-site.mjs` | Copies only the public site (HTML, `css/`, `js/`, `images/`, `sw.js`) into `dist/`. |
+| `scripts/build-site.mjs` | Copies only the public site (HTML, `css/`, `js/`, `images/`, `sw.js`) into `dist/`, and writes `dist/_routes.json` so static files skip Functions — only `/api/*` and profile links run one. |
 | `wrangler.toml` | Tells Cloudflare to publish `dist/` and enables Node compatibility for the push library. |
 | `api/` | The old Vercel versions. Keep until the switch is confirmed, then delete. |
 

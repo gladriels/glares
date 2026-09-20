@@ -2621,3 +2621,462 @@ body.search-open { overflow: hidden; }
 .profile-share-save:disabled { opacity: .5; cursor: default; transform: none; }
 #profile-modal .profile-edit-photo .avatar-preview { width: 72px; height: 72px; flex: 0 0 72px; margin: 0; }
 .song-search-results:empty { display: none; }
+
+/* ================= The Cut — pass/keep deck (cut.html) =================
+   The page is dark so the photo is the only light in the frame. A card sits
+   slightly under-saturated until a verdict starts: dragging left washes it
+   flat and grey, dragging right warms it into full grade. The look is the
+   verdict, so the UI itself stays almost silent. */
+
+.cut-body {
+  margin: 0;
+  height: 100dvh;
+  overflow: hidden;
+  background: #0B0B0A;
+  color: #F4F3F0;
+  overscroll-behavior: none;
+}
+
+.cut-shell {
+  height: 100dvh;
+  max-width: 460px;
+  margin: 0 auto;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* ---- header ---- */
+.cut-top {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 0 8px;
+}
+.cut-back, .cut-sound {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04);
+  color: rgba(255,255,255,.82);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background .18s ease, border-color .18s ease;
+}
+.cut-back:hover, .cut-sound:hover { background: rgba(255,255,255,.09); border-color: rgba(255,255,255,.22); }
+.cut-back svg, .cut-sound svg { width: 18px; height: 18px; display: block; }
+.cut-titles { text-align: center; line-height: 1.1; }
+.cut-eyebrow {
+  display: block;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.4);
+  margin-bottom: 3px;
+}
+.cut-wordmark {
+  display: block;
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+/* ---- audience chips ---- */
+.cut-chips {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+}
+.cut-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .04em;
+  color: rgba(255,255,255,.45);
+  background: none;
+  border: 1px solid transparent;
+  padding: 6px 13px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color .18s ease, background .18s ease;
+}
+.cut-chip.active { background: rgba(255,255,255,.1); color: #fff; }
+.cut-chip:hover { color: rgba(255,255,255,.8); }
+
+/* ---- stage + stack ---- */
+.cut-stage {
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+.cut-loading {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: rgba(255,255,255,.4);
+}
+
+.cut-card {
+  --pass-amt: 0;
+  --keep-amt: 0;
+  position: absolute;
+  /* Sized off the stage so the card owns the frame on any phone, while the
+     margins keep it clearly a card rather than a full-screen takeover. */
+  width: min(80vw, 344px);
+  height: min(84%, 500px);
+  border-radius: 20px;
+  overflow: hidden;
+  background: #151513;
+  box-shadow: 0 26px 70px rgba(0,0,0,.6);
+  transform-origin: 50% 62%;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+.cut-card.is-front:active { cursor: grabbing; }
+.cut-card.is-settling { transition: transform .44s cubic-bezier(.18,.89,.32,1.2), opacity .3s ease; }
+.cut-card.is-settling .cut-photo img { transition: filter .42s ease; }
+.cut-card.is-behind { transition: transform .4s cubic-bezier(.22,.8,.3,1); }
+.cut-card.is-behind .cut-photo img { filter: saturate(.35) brightness(.52); }
+.cut-card.is-behind::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(11,11,10,.42);
+}
+.cut-card.is-returning { transform: translate3d(-40%, 0, 0) rotate(-8deg); opacity: 0; }
+
+.cut-photo { position: absolute; inset: 0; }
+.cut-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  /* Resting grade. The live grade is written inline by setVerdict() in
+     cut.js — a var() inside calc() inside filter() is substituted once and
+     never re-resolves as the value changes, so the drag has to drive it. */
+  filter: saturate(.88) contrast(1.03);
+}
+.cut-photo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(0,0,0,.44) 0%, rgba(0,0,0,0) 30%, rgba(0,0,0,0) 40%, rgba(0,0,0,.55) 72%, rgba(0,0,0,.88) 100%);
+  pointer-events: none;
+}
+
+/* Veils carry the verdict even where filter() with calc() is unsupported. */
+.cut-veil-pass, .cut-veil-keep {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.cut-veil-pass {
+  background: linear-gradient(200deg, rgba(120,120,124,.5), rgba(28,28,30,.62));
+  opacity: var(--pass-amt);
+  mix-blend-mode: color;
+}
+.cut-veil-keep {
+  background: radial-gradient(120% 90% at 50% 12%, rgba(255,196,120,.34), rgba(232,149,46,.16) 55%, rgba(255,255,255,0) 82%);
+  opacity: var(--keep-amt);
+}
+
+.cut-card-top {
+  position: absolute;
+  top: 13px;
+  left: 13px;
+  right: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cut-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.9);
+  background: rgba(0,0,0,.42);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  padding: 5px 10px;
+  border-radius: 999px;
+}
+.cut-tag-found { background: rgba(31,122,77,.9); }
+.cut-tag-found svg { width: 11px; height: 11px; }
+
+.cut-card-bottom {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 15px;
+}
+.cut-card-title {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 21px;
+  line-height: 1.12;
+  letter-spacing: -.02em;
+  margin: 0 0 7px;
+  color: #fff;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cut-card-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: .05em;
+  color: rgba(255,255,255,.66);
+}
+.cut-card-budget { color: var(--accent); white-space: nowrap; }
+
+/* ---- verdict stamps ---- */
+.cut-stamp {
+  position: absolute;
+  top: 62px;   /* clears the category / Found tags on the row above */
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .2em;
+  padding: 7px 13px;
+  border-radius: 7px;
+  opacity: 0;
+  pointer-events: none;
+}
+.cut-stamp-pass {
+  right: 16px;
+  color: #E0453A;
+  border: 2px solid #E0453A;
+  transform: rotate(13deg);
+  opacity: var(--pass-amt);
+}
+.cut-stamp-keep {
+  left: 16px;
+  color: #fff;
+  border: 2px solid #fff;
+  transform: rotate(-13deg);
+  opacity: var(--keep-amt);
+}
+
+/* ---- the two verdicts ---- */
+.cut-card.is-out-pass {
+  transition: transform .26s cubic-bezier(.42,0,.9,.25), opacity .26s linear .04s;
+  opacity: 0;
+}
+.cut-flash {
+  position: absolute;
+  inset: 0;
+  background: #FFFFFF;
+  pointer-events: none;
+  z-index: 6;
+  animation: cut-flash-out .17s steps(2, end) forwards;
+}
+@keyframes cut-flash-out { 0% { opacity: .95; } 100% { opacity: 0; } }
+
+/* Kept: the only shot in full grade, held while everything else falls away. */
+.cut-card.is-kept {
+  transition: transform .5s cubic-bezier(.2,.9,.28,1.05), box-shadow .5s ease;
+  transform: translate3d(0, -6px, 0) scale(1.045) !important;
+  box-shadow: 0 32px 90px rgba(232,149,46,.22), 0 20px 60px rgba(0,0,0,.66);
+  z-index: 70;
+}
+.cut-card.is-kept .cut-stamp-keep { opacity: 1; }
+.cut-card.is-kept-out {
+  transition: transform .42s cubic-bezier(.4,0,.6,1), opacity .42s ease;
+  transform: translate3d(0, -14%, 0) scale(1.08) !important;
+  opacity: 0;
+}
+.cut-stage.is-holding .cut-card:not(.is-kept) { opacity: .16; transition: opacity .3s ease; }
+
+/* ---- progress + actions ---- */
+.cut-progress {
+  flex: 0 0 auto;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(255,255,255,.08);
+  overflow: hidden;
+  margin: 14px 0 0;
+}
+.cut-progress span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: rgba(255,255,255,.6);
+  transition: width .4s cubic-bezier(.22,.8,.3,1);
+}
+
+.cut-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 16px 0 6px;
+}
+.cut-act {
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.05);
+  color: #F4F3F0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: transform .14s ease, border-color .2s ease, background .2s ease, opacity .2s ease;
+}
+.cut-act:active { transform: scale(.92); }
+.cut-act svg { width: 22px; height: 22px; display: block; }
+.cut-act-pass { color: #E0453A; }
+.cut-act-pass:hover { border-color: rgba(224,69,58,.6); background: rgba(224,69,58,.1); }
+.cut-act-keep:hover { border-color: rgba(232,149,46,.65); background: rgba(232,149,46,.12); color: #FFC97A; }
+.cut-act-undo { width: 44px; height: 44px; color: rgba(255,255,255,.5); }
+.cut-act-undo svg { width: 17px; height: 17px; }
+.cut-act-undo:disabled { opacity: .3; cursor: default; }
+.cut-stage.is-holding ~ .cut-actions { opacity: .2; pointer-events: none; }
+
+.cut-hint {
+  flex: 0 0 auto;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: .05em;
+  color: rgba(255,255,255,.3);
+  margin: 0;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ---- end of deck ---- */
+.cut-summary {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+  padding: 0 8px;
+}
+.cut-summary-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.42);
+  margin: 0;
+}
+.cut-summary h2 {
+  font-family: var(--display);
+  font-size: 29px;
+  font-weight: 800;
+  letter-spacing: -.03em;
+  margin: 0;
+}
+.cut-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 62px);
+  gap: 7px;
+  margin: 4px 0 2px;
+}
+.cut-summary-tile {
+  width: 62px;
+  height: 78px;
+  border-radius: 9px;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 8px 22px rgba(0,0,0,.45);
+  transition: transform .2s ease;
+}
+.cut-summary-tile:hover { transform: translateY(-3px) scale(1.03); }
+.cut-summary-note {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: rgba(255,255,255,.4);
+  margin: 0;
+  max-width: 30ch;
+  line-height: 1.6;
+}
+.cut-again {
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .05em;
+  background: #F4F3F0;
+  color: #111;
+  border: 0;
+  border-radius: 999px;
+  padding: 13px 26px;
+  cursor: pointer;
+  transition: transform .15s ease;
+}
+.cut-again:active { transform: scale(.96); }
+
+.cut-live {
+  position: absolute;
+  top: 0;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 380px) {
+  .cut-card { width: 84vw; }
+  .cut-act { width: 52px; height: 52px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cut-card, .cut-card.is-settling, .cut-card.is-behind,
+  .cut-card.is-out-pass, .cut-card.is-kept, .cut-card.is-kept-out {
+    transition-duration: .01ms !important;
+  }
+  .cut-flash { display: none; }
+}
+
+/* ---- the entry tile on the feed ---- */
+.section-cut {
+  background-color: #111110;
+  background-image:
+    radial-gradient(130% 100% at 78% 8%, rgba(232,149,46,.34), rgba(232,149,46,0) 58%),
+    linear-gradient(155deg, #26251F 0%, #121211 52%, #0B0B0A 100%);
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.section-cut::before { background: none; }
+.section-cut .section-eyebrow {
+  position: relative;
+  z-index: 1;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.5);
+}
+.section-cut .section-label { font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 600; font-size: 25px; }

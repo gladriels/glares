@@ -8,7 +8,7 @@ import { cpSync, mkdirSync, rmSync, existsSync, writeFileSync } from "node:fs";
 
 const PUBLIC = [
   "index.html", "messages.html", "profile.html", "reel.html", "request.html",
-  "store.html", "store-item.html",
+  "store.html", "store-item.html", "cut.html",
   "sw.js", "css", "js", "images"
 ];
 

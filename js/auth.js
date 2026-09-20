@@ -179,7 +179,7 @@ function loadScriptOnce(src) {
 // problem as they type rather than after pressing Save.
 const RESERVED_USERNAMES = new Set([
   "api", "css", "js", "images", "index", "profile", "profiles", "request", "requests",
-  "reel", "messages", "store", "store-item", "search", "settings", "admin", "glares",
+  "reel", "messages", "store", "store-item", "search", "settings", "admin", "glares", "cut",
   "about", "help", "login", "signup", "explore", "dist", "functions", "www"
 ]);
 

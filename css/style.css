@@ -3080,3 +3080,47 @@ body.search-open { overflow: hidden; }
   color: rgba(255,255,255,.5);
 }
 .section-cut .section-label { font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 600; font-size: 25px; }
+
+/* ---- film mode (/cut?film=1) ----
+   Drives the sequence for a screen recording: the rhythm is fixed, nothing
+   needs a cursor, and the last beat travels into the photo so the footage
+   can cut straight to a live-action shot of the same place. */
+body.is-filming .cut-card { cursor: default; }
+body.is-filming .cut-hint { opacity: 0; transition: opacity .4s ease; }
+body.is-bare .cut-actions,
+body.is-bare .cut-chips,
+body.is-bare .cut-progress,
+body.is-bare .cut-hint { opacity: 0; pointer-events: none; transition: opacity .5s ease; }
+
+/* The push-in: the card grows past the frame while its corners square off,
+   so the final frame is nothing but the photo. */
+.cut-card.is-pushing {
+  --push-scale: 3;
+  --push-ms: 2600ms;
+  transition:
+    transform var(--push-ms) cubic-bezier(.38, 0, .22, 1),
+    border-radius var(--push-ms) cubic-bezier(.38, 0, .22, 1),
+    box-shadow var(--push-ms) ease;
+  transform: translate3d(0, 0, 0) scale(var(--push-scale)) !important;
+  border-radius: 0;
+  box-shadow: none;
+  z-index: 90;
+}
+.cut-card.is-pushing .cut-card-top,
+.cut-card.is-pushing .cut-card-bottom,
+.cut-card.is-pushing .cut-stamp,
+.cut-card.is-pushing .cut-photo::after {
+  opacity: 0;
+  transition: opacity .6s ease;
+}
+/* Beats .cut-stage.is-holding ~ .cut-actions, which would otherwise leave the
+   buttons at 20% over the final frame. */
+body.is-pushing .cut-shell .cut-top,
+body.is-pushing .cut-shell .cut-chips,
+body.is-pushing .cut-shell .cut-actions,
+body.is-pushing .cut-shell .cut-progress,
+body.is-pushing .cut-shell .cut-hint {
+  opacity: 0;
+  transition: opacity .7s ease;
+  pointer-events: none;
+}

@@ -468,6 +468,99 @@ function initSound() {
   });
 }
 
+/* ---------------- film mode ----------------
+   /cut?film=1 performs the sequence for a screen recording: rejects fire on
+   a fixed beat so the rhythm is exact and repeatable, then everything stops
+   on the keeper — full grade, silence — and pushes in until the photo fills
+   the frame. That last frame is the cut point for the live-action shot.
+
+   Params: beat (ms between rejects), rejects (how many), keep (a request id
+   to stop on, otherwise the first Places post), bare=1 to hide the chrome. */
+
+function filmOptions() {
+  const q = new URLSearchParams(window.location.search);
+  return {
+    on: q.get("film") === "1",
+    beat: Math.max(140, Number(q.get("beat")) || 360),
+    rejects: Math.max(1, Number(q.get("rejects")) || 7),
+    keepId: q.get("keep") || "",
+    bare: q.get("bare") === "1",
+    push: Math.max(600, Number(q.get("push")) || 2600)
+  };
+}
+
+function pickKeeper(opts) {
+  if (opts.keepId) {
+    const chosen = pool.find(p => p.id === opts.keepId);
+    if (chosen) return chosen;
+  }
+  // The script wants a place to travel into, so a Places post leads.
+  return pool.find(p => p.category === "Places") || pool[0];
+}
+
+async function runFilm() {
+  const opts = filmOptions();
+  const keeper = pickKeeper(opts);
+  if (!keeper) return;
+
+  document.body.classList.add("is-filming");
+  if (opts.bare) document.body.classList.add("is-bare");
+
+  // A fresh deck: rejects first, the keeper last.
+  stage.querySelectorAll(".cut-card").forEach(c => c.remove());
+  cards = [];
+  history = [];
+  keptPosts = [];
+  passedCount = 0;
+  dealtCount = 0;
+  const rejects = shuffle(pool.filter(p => p.id !== keeper.id)).slice(0, opts.rejects);
+  queue = [...rejects, keeper];
+
+  // Every photo has to be decoded before the first beat — a card arriving
+  // empty at 340ms ruins the take, and there is no second chance in a
+  // recording. Capped so a dead image can't stall the shoot.
+  await Promise.race([
+    Promise.all(queue.map(p => new Promise(resolve => {
+      const img = new Image();
+      img.onload = img.onerror = resolve;
+      img.src = p.image_url;
+    }))),
+    wait(8000)
+  ]);
+
+  fill();
+
+  // Let the first frame settle before the filter starts running.
+  await wait(900);
+
+  for (let i = 0; i < rejects.length; i++) {
+    if (!cards.length) break;
+    commit(-1);
+    await wait(opts.beat);
+  }
+
+  // The keeper: hold it, then travel into it.
+  await wait(260);
+  const card = cards[0];
+  if (!card) return;
+  setVerdict(card, 200);
+  card.classList.add("is-kept");
+  stage.classList.add("is-holding");
+  await wait(900);
+
+  // Scale the photo until it covers the frame — the hand-off to the next shot.
+  const box = card.getBoundingClientRect();
+  const cover = Math.max(window.innerWidth / box.width, window.innerHeight / box.height) * 1.06;
+  card.style.setProperty("--push-scale", cover.toFixed(3));
+  card.style.setProperty("--push-ms", `${opts.push}ms`);
+  document.body.classList.add("is-pushing");
+  card.classList.add("is-pushing");
+}
+
+function wait(ms) {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
 async function loadCut() {
   document.getElementById("cut-keep").innerHTML = ICONS.heart;
   initSound();
@@ -492,6 +585,7 @@ async function loadCut() {
 
   pool = (data ?? []).filter(p => p.image_url);
   renderChips();
+  if (filmOptions().on) { runFilm(); return; }
   deal();
 }
 

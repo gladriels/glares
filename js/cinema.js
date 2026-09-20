@@ -127,7 +127,17 @@ function cinemaHeroDrift() {
   paint();
 }
 
+// Blur is the costly half of the focus pull. Anything small or memory-shy
+// runs the version without it rather than dropping the effect entirely.
+function cinemaPickQuality() {
+  const lowMemory = typeof navigator.deviceMemory === "number" && navigator.deviceMemory <= 4;
+  const fewCores = typeof navigator.hardwareConcurrency === "number" && navigator.hardwareConcurrency <= 4;
+  const smallScreen = window.matchMedia("(max-width: 700px)").matches;
+  if (lowMemory || fewCores || smallScreen) document.documentElement.classList.add("cinema-lite");
+}
+
 document.addEventListener("DOMContentLoaded", () => {
+  cinemaPickQuality();
   cinemaScan();
   cinemaWatchForNewContent();
   cinemaHeroDrift();

@@ -19,8 +19,14 @@ function spotifyEmbedUrl(url) {
   return `https://open.spotify.com/embed/track/${match[1]}?utm_source=generator&theme=0`;
 }
 
-function revealOnScroll(selector) {
-  const items = document.querySelectorAll(selector);
+// Accepts the exact elements to watch, because the feed now appends in
+// batches: re-querying the whole board each time would hand every earlier
+// card to yet another observer and leave the old ones alive.
+function revealOnScroll(selectorOrNodes) {
+  const items = typeof selectorOrNodes === "string"
+    ? document.querySelectorAll(selectorOrNodes)
+    : selectorOrNodes;
+  if (!items.length) return;
   const observer = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
@@ -296,26 +302,20 @@ function renderTicketMedia(r, likeButtonHtml) {
   return textPostBodyHtml(r, likeButtonHtml);
 }
 
-function renderFeed() {
-  const board = document.getElementById("board");
-  const base = feedSourceList();
-  const filtered = activeCategory
-    ? base.filter(r => r.category === activeCategory)
-    : base;
+// How many cards paint immediately. The rest stream in as the feed is
+// scrolled, because every post carries a full-resolution photo: painting all
+// of them at once had the browser decoding ~90 megapixels to show ~19, which
+// is what made the feed stutter on arrival and while scrolling.
+const FEED_FIRST_PAINT = 12;
+const FEED_CHUNK = 9;
 
-  if (!filtered.length) {
-    const emptyMessages = {
-      recent: "You haven't viewed any posts yet — browse Shuffle or Staff Picks to get started.",
-    };
-    board.innerHTML = `<p class="empty-state">${emptyMessages[feedMode] ?? "No open requests here yet. Be the first to post one."}</p>`;
-    return;
-  }
+let feedRenderToken = 0;
 
-  board.innerHTML = filtered.map((r, i) => {
-    const likeCount = likesByRequest.get(r.id)?.size ?? 0;
-    const isLiked = currentUserId ? !!likesByRequest.get(r.id)?.has(currentUserId) : false;
-    const likeButtonHtml = `<button type="button" class="like-btn${isLiked ? " is-liked" : ""}" data-id="${r.id}" aria-label="Like">${ICONS.heart}<span class="like-count">${likeCount ? likeCount : ""}</span></button>`;
-    return `
+function ticketHtml(r) {
+  const likeCount = likesByRequest.get(r.id)?.size ?? 0;
+  const isLiked = currentUserId ? !!likesByRequest.get(r.id)?.has(currentUserId) : false;
+  const likeButtonHtml = `<button type="button" class="like-btn${isLiked ? " is-liked" : ""}" data-id="${r.id}" aria-label="Like">${ICONS.heart}<span class="like-count">${likeCount ? likeCount : ""}</span></button>`;
+  return `
     <div class="ticket-wrap">
       <a href="request.html#${r.id}" class="ticket${r.spotify_url ? " has-spotify" : ""}${r.image_url ? "" : " ticket-text-only"}" data-id="${r.id}"${r.spotify_url ? ` data-spotify="${escapeHtml(r.spotify_url)}"` : ""}${r.image_url ? ` style="--post-image: url('${escapeHtml(r.image_url)}')"` : ""}>
         ${r.is_sponsored ? `<span class="sponsored-badge">★ Sponsored</span>` : ""}
@@ -329,32 +329,98 @@ function renderFeed() {
       ` : ""}
     </div>
   `;
-  }).join("");
+}
 
-  wireLikeButtons(board);
-  wireStaffPickButtons(board);
+// Wiring is per batch rather than per board, so cards appended later get
+// their handlers without the earlier ones being bound a second time.
+function wireFeedCards(nodes) {
+  nodes.forEach(node => {
+    wireLikeButtons(node);
+    wireStaffPickButtons(node);
 
-  document.querySelectorAll(".ticket[data-spotify]").forEach(ticket => {
-    ticket.addEventListener("click", () => {
-      try {
-        sessionStorage.setItem("esven-autoplay-request", ticket.dataset.id);
-      } catch (_) {}
+    node.querySelectorAll(".ticket[data-spotify]").forEach(ticket => {
+      ticket.addEventListener("click", () => {
+        try { sessionStorage.setItem("esven-autoplay-request", ticket.dataset.id); } catch (_) {}
+      });
+    });
+
+    node.querySelectorAll(".delete-btn").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        if (!confirm("Delete this request? This can't be undone.")) return;
+        const { error } = await supabase.from("requests").delete().eq("id", btn.dataset.id);
+        if (error) { alert("Couldn't delete: " + error.message); return; }
+        allRequests = allRequests.filter(r => r.id !== btn.dataset.id);
+        renderFeed();
+      });
     });
   });
+}
 
-  document.querySelectorAll(".delete-btn").forEach(btn => {
-    btn.addEventListener("click", async (e) => {
-      e.preventDefault();
-      if (!confirm("Delete this request? This can't be undone.")) return;
-      const { error } = await supabase.from("requests").delete().eq("id", btn.dataset.id);
-      if (error) { alert("Couldn't delete: " + error.message); return; }
-      allRequests = allRequests.filter(r => r.id !== btn.dataset.id);
-      renderFeed();
-    });
-  });
+function appendFeedCards(board, rows) {
+  const holder = document.createElement("div");
+  holder.innerHTML = rows.map(ticketHtml).join("");
+  const added = [...holder.children];
+  added.forEach(node => board.appendChild(node));
+  wireFeedCards(added);
+  const tickets = added.map(node => node.querySelector(".ticket")).filter(Boolean);
+  requestAnimationFrame(() => revealOnScroll(tickets));
+  return added;
+}
 
-  // trigger reveal animation on next frame so the transition actually fires
-  requestAnimationFrame(() => revealOnScroll(".ticket"));
+function renderFeed() {
+  const board = document.getElementById("board");
+  const base = feedSourceList();
+  const filtered = activeCategory
+    ? base.filter(r => r.category === activeCategory)
+    : base;
+
+  // Any chunking still queued from a previous render belongs to a feed that
+  // no longer exists, so bump the token to strand it.
+  feedRenderToken++;
+  const token = feedRenderToken;
+  document.getElementById("feed-sentinel")?.remove();
+
+  if (!filtered.length) {
+    const emptyMessages = {
+      recent: "You haven't viewed any posts yet — browse Shuffle or Staff Picks to get started.",
+    };
+    board.innerHTML = `<p class="empty-state">${emptyMessages[feedMode] ?? "No open requests here yet. Be the first to post one."}</p>`;
+    return;
+  }
+
+  board.innerHTML = "";
+  appendFeedCards(board, filtered.slice(0, FEED_FIRST_PAINT));
+
+  let next = FEED_FIRST_PAINT;
+  if (next >= filtered.length) return;
+
+  // A sentinel under the board pulls the next batch in slightly before it is
+  // reached, so scrolling never arrives at an empty gap.
+  const sentinel = document.createElement("div");
+  sentinel.id = "feed-sentinel";
+  sentinel.setAttribute("aria-hidden", "true");
+  board.after(sentinel);
+
+  const stop = () => { observer.disconnect(); sentinel.remove(); };
+
+  // Keeps filling while the sentinel is still within reach. One chunk is not
+  // always enough: on a tall screen the sentinel can remain on-screen after a
+  // batch lands, and IntersectionObserver does not fire again for an element
+  // that never stopped intersecting — the feed would stall with posts left.
+  const pump = () => {
+    if (token !== feedRenderToken) { stop(); return; }
+    if (next >= filtered.length) { stop(); return; }
+    if (sentinel.getBoundingClientRect().top > window.innerHeight + 900) return;
+    appendFeedCards(board, filtered.slice(next, next + FEED_CHUNK));
+    next += FEED_CHUNK;
+    window.setTimeout(pump, 60);
+  };
+
+  const observer = new IntersectionObserver((entries) => {
+    if (entries.some(e => e.isIntersecting)) pump();
+  }, { rootMargin: "900px 0px" });
+  observer.observe(sentinel);
 }
 
 function initCategoryRow() {

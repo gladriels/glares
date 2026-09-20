@@ -42,14 +42,24 @@
 @keyframes cinema-focus-pull {
   from {
     opacity: 0;
-    transform: scale(1.05);
-    filter: blur(13px) saturate(.5) brightness(.9);
+    transform: scale(1.04);
+    filter: blur(8px) saturate(.55);
   }
   to {
     opacity: 1;
     transform: none;
     filter: none;
   }
+}
+
+/* Phones and low-memory machines get the same move without the blur, which
+   is the expensive part of it — a large photo has to be re-rasterised every
+   frame it is blurred. The fade and the settle carry the idea on their own. */
+.cinema-lite .cinema-shot { animation-name: cinema-focus-pull-lite; }
+
+@keyframes cinema-focus-pull-lite {
+  from { opacity: 0; transform: scale(1.03); }
+  to { opacity: 1; transform: none; }
 }
 
 /* ---- blocks that rise into place ---- */

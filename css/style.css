@@ -1,4 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Cormorant+Garamond:wght@500;600&display=swap');
+/* Fonts are loaded with a <link> in each page's <head> so they download
+   in parallel with this stylesheet instead of waiting for it. */
 
 :root {
   --bg: #FAFAF8;

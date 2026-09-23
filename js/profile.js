@@ -135,7 +135,7 @@ async function loadProfile() {
       .order("created_at", { ascending: false }),
     supabase
       .from("recommendations")
-      .select("id, note, created_at, request_id, requests(id, title)")
+      .select("id, note, created_at, request_id, requests!recommendations_request_id_fkey(id, title)")
       .eq("user_id", profile.id)
       .order("created_at", { ascending: false }),
     supabase.from("follows").select("*", { count: "exact", head: true }).eq("following_id", profile.id),

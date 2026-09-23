@@ -133,7 +133,7 @@ function buildCard(post) {
   const asker = post.profiles?.username ?? "someone";
   el.innerHTML = `
     <div class="cut-photo">
-      <img src="${escapeHtml(post.image_url)}" alt="" decoding="async">
+      <img src="${escapeHtml(post.thumb_url || post.image_url)}" alt="" decoding="async">
       <span class="cut-veil-pass" aria-hidden="true"></span>
       <span class="cut-veil-keep" aria-hidden="true"></span>
       <div class="cut-card-top">
@@ -204,7 +204,7 @@ function dealNext() {
   cards.push(card);
   dealtCount++;
   // Warm the next photo so the stack never shows a blank card.
-  if (queue[0]?.image_url) new Image().src = queue[0].image_url;
+  if (queue[0]?.image_url) new Image().src = queue[0].thumb_url || queue[0].image_url;
 }
 
 function fill() {
@@ -405,7 +405,7 @@ function showSummary() {
     ${keptPosts.length ? `
       <div class="cut-summary-grid">
         ${keptPosts.slice(0, 9).map(p => `
-          <a href="request.html#${p.id}" class="cut-summary-tile" style="background-image:url('${escapeHtml(p.image_url)}')" aria-label="${escapeHtml(p.title || "post")}"></a>
+          <a href="request.html#${p.id}" class="cut-summary-tile" style="background-image:url('${escapeHtml(p.thumb_url || p.image_url)}')" aria-label="${escapeHtml(p.title || "post")}"></a>
         `).join("")}
       </div>` : ""}
     ${keptPosts.length && !currentUser ? `<p class="cut-summary-note">Sign in and your keeps get saved to your likes.</p>` : ""}
@@ -523,7 +523,7 @@ async function runFilm() {
     Promise.all(queue.map(p => new Promise(resolve => {
       const img = new Image();
       img.onload = img.onerror = resolve;
-      img.src = p.image_url;
+      img.src = p.thumb_url || p.image_url;
     }))),
     wait(8000)
   ]);
@@ -568,7 +568,7 @@ async function loadCut() {
   const [{ data, error }, user] = await Promise.all([
     supabase
       .from("requests")
-      .select("id, title, budget, category, audience, image_url, found_recommendation_id, created_at, profiles!requests_user_id_fkey(username)")
+      .select("id, title, budget, category, audience, image_url, thumb_url, found_recommendation_id, created_at, profiles!requests_user_id_fkey(username)")
       .eq("status", "open")
       .not("image_url", "is", null)
       .order("created_at", { ascending: false }),

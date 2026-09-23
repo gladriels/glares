@@ -22,7 +22,7 @@ async function loadSolved() {
   // "Solved" = a request that has at least one favorited recommendation.
   const { data: favRecs, error } = await supabase
     .from("recommendations")
-    .select("request_id, requests(id, title, image_url, profiles!requests_user_id_fkey(username))")
+    .select("request_id, requests(id, title, image_url, thumb_url, profiles!requests_user_id_fkey(username))")
     .eq("is_favorite", true)
     .limit(12);
 
@@ -41,7 +41,7 @@ async function loadSolved() {
   grid.innerHTML = solved.map(r => `
     <a href="request.html#${r.id}" class="solved-card">
       ${r.image_url
-        ? `<img src="${r.image_url}" alt="" class="solved-thumb" loading="lazy" decoding="async">`
+        ? `<img src="${r.thumb_url || r.image_url}" alt="" class="solved-thumb" loading="lazy" decoding="async">`
         : `<div class="solved-thumb solved-thumb-empty"></div>`}
       ${r.title ? `<p class="solved-title">${escapeHtml(r.title)}</p>` : ""}
       <p class="solved-sub">${r.profiles?.username ?? "someone"}</p>

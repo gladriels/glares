@@ -130,7 +130,7 @@ async function loadProfile() {
   const [reqResult, recResult, followerResult, followingResult, followRow, viewerProfile, viewerLikes, profileLikes] = await Promise.all([
     supabase
       .from("requests")
-      .select("id, title, description, budget, category, image_url, image_width, image_height, spotify_url, created_at, is_staff_pick, staff_pick_rank, found_recommendation_id")
+      .select("id, title, description, budget, category, image_url, thumb_url, image_width, image_height, spotify_url, created_at, is_staff_pick, staff_pick_rank, found_recommendation_id")
       .eq("user_id", profile.id)
       .order("created_at", { ascending: false }),
     supabase
@@ -325,7 +325,7 @@ async function loadLikedPosts(profile, isOwnProfile) {
 
   const { data: liked, error } = await supabase
     .from("likes")
-    .select("request_id, created_at, requests(id, title, category, image_url)")
+    .select("request_id, created_at, requests(id, title, category, image_url, thumb_url)")
     .eq("user_id", profile.id)
     .order("created_at", { ascending: false });
 
@@ -343,7 +343,7 @@ async function loadLikedPosts(profile, isOwnProfile) {
 
   likedContainer.innerHTML = posts.map(r => `
     <a href="request.html#${r.id}" class="ig-grid-item${r.image_url ? " has-image" : ""}">
-      ${r.image_url ? `<img src="${r.image_url}" alt="${escapeHtml(r.title)}" loading="lazy" decoding="async" onerror="this.remove(); this.parentElement.classList.remove('has-image')">` : ""}
+      ${r.image_url ? `<img src="${r.thumb_url || r.image_url}" alt="${escapeHtml(r.title)}" loading="lazy" decoding="async" onerror="this.remove(); this.parentElement.classList.remove('has-image')">` : ""}
       <span class="ig-grid-item-fallback">${escapeHtml(r.title)}</span>
       <span class="ig-grid-item-overlay">
         ${r.category ? `<span class="ig-grid-item-tag">${escapeHtml(r.category)}</span>` : ""}
@@ -400,7 +400,7 @@ function renderProfileGrid() {
     const isPinned = r.id === pinnedId;
     return `
     <a href="request.html#${r.id}" class="ig-grid-item${r.image_url ? " has-image" : ""}${isPinned ? " is-pinned" : ""}">
-      ${r.image_url ? `<img src="${r.image_url}" alt="${escapeHtml(r.title || "")}" loading="lazy" decoding="async" onerror="this.parentElement.classList.remove('has-image'); this.remove()">` : ""}
+      ${r.image_url ? `<img src="${r.thumb_url || r.image_url}" alt="${escapeHtml(r.title || "")}" loading="lazy" decoding="async" onerror="this.parentElement.classList.remove('has-image'); this.remove()">` : ""}
       <span class="ig-grid-item-fallback">${escapeHtml(r.title || r.description || "")}</span>
       ${isPinned ? `<span class="ig-grid-item-pinned">${ICONS.pin}<span>Pinned</span></span>` : ""}
       ${viewingOwnProfile ? `<button type="button" class="ig-pin-btn${isPinned ? " is-pinned" : ""}" data-pin="${r.id}" title="${isPinned ? "Unpin from profile" : "Pin to top of profile"}" aria-label="${isPinned ? "Unpin from profile" : "Pin to top of profile"}">${ICONS.pin}</button>` : ""}

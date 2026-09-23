@@ -45,7 +45,7 @@ async function loadFeed() {
 
   const requestsQuery = supabase
     .from("requests")
-    .select("id, title, description, budget, category, audience, spotify_url, image_url, image_width, image_height, is_sponsored, is_staff_pick, staff_pick_rank, found_recommendation_id, user_id, created_at, profiles!requests_user_id_fkey(username, avatar_url)")
+    .select("id, title, description, budget, category, audience, spotify_url, image_url, thumb_url, image_width, image_height, is_sponsored, is_staff_pick, staff_pick_rank, found_recommendation_id, user_id, created_at, profiles!requests_user_id_fkey(username, avatar_url)")
     .eq("status", "open")
     .order("is_sponsored", { ascending: false })
     .order("created_at", { ascending: false });
@@ -156,7 +156,7 @@ function renderTrending() {
     return `
     <a href="request.html#${r.id}" class="trending-card" data-id="${r.id}">
       <div class="trending-image">
-        <img src="${r.image_url}" alt="" loading="lazy" decoding="async">
+        <img src="${r.thumb_url || r.image_url}" alt="" loading="lazy" decoding="async">
         ${currentUserIsAdmin ? `<button type="button" class="staff-pick-toggle${r.is_staff_pick ? " is-picked" : ""}" data-id="${r.id}" title="${r.is_staff_pick ? "Remove staff pick" : "Mark as staff pick"}" aria-label="Toggle staff pick">${ICONS.star}</button>` : ""}
         <button type="button" class="like-btn${isLiked ? " is-liked" : ""}" data-id="${r.id}" aria-label="Like">${ICONS.heart}<span class="like-count">${likeCount ? likeCount : ""}</span></button>
       </div>
@@ -288,7 +288,7 @@ function renderTicketMedia(r, likeButtonHtml) {
       : "";
     return `
         <div class="ticket-image">
-          <img src="${r.image_url}" alt=""${dims} loading="lazy" decoding="async">
+          <img src="${r.thumb_url || r.image_url}" alt=""${dims} loading="lazy" decoding="async">
           ${r.spotify_url ? `<span class="ticket-song-badge" title="Song attached" aria-label="Song attached">${ICONS.music}</span>` : ""}
           ${likeButtonHtml}
           <div class="ticket-overlay">
@@ -317,7 +317,7 @@ function ticketHtml(r) {
   const likeButtonHtml = `<button type="button" class="like-btn${isLiked ? " is-liked" : ""}" data-id="${r.id}" aria-label="Like">${ICONS.heart}<span class="like-count">${likeCount ? likeCount : ""}</span></button>`;
   return `
     <div class="ticket-wrap">
-      <a href="request.html#${r.id}" class="ticket${r.spotify_url ? " has-spotify" : ""}${r.image_url ? "" : " ticket-text-only"}" data-id="${r.id}"${r.spotify_url ? ` data-spotify="${escapeHtml(r.spotify_url)}"` : ""}${r.image_url ? ` style="--post-image: url('${escapeHtml(r.image_url)}')"` : ""}>
+      <a href="request.html#${r.id}" class="ticket${r.spotify_url ? " has-spotify" : ""}${r.image_url ? "" : " ticket-text-only"}" data-id="${r.id}"${r.spotify_url ? ` data-spotify="${escapeHtml(r.spotify_url)}"` : ""}${r.image_url ? ` style="--post-image: url('${escapeHtml(r.thumb_url || r.image_url)}')"` : ""}>
         ${r.is_sponsored ? `<span class="sponsored-badge">★ Sponsored</span>` : ""}
         ${r.found_recommendation_id && !r.is_sponsored ? `<span class="found-badge found-badge-card">${ICONS.check}<span>Found</span></span>` : ""}
         ${renderTicketMedia(r, likeButtonHtml)}
@@ -435,16 +435,27 @@ function initCategoryRow() {
   });
 }
 
-// Returns { url, width, height } — dimensions get stored alongside the post so
-// the feed can reserve exact space for the image before it loads.
-async function uploadRequestImage(user, file) {
-  if (!file) return { url: "", width: null, height: null };
-  const { blob, width, height, name } = await prepareImageForUpload(file);
-  const path = `${user.id}/${Date.now()}-${name.replace(/[^a-zA-Z0-9.]/g, "_")}`;
-  const { error } = await supabase.storage.from("request-images").upload(path, blob);
+async function uploadSizedImage(user, sized, subdir) {
+  const path = `${user.id}/${subdir}${Date.now()}-${sized.name.replace(/[^a-zA-Z0-9.]/g, "_")}`;
+  const { error } = await supabase.storage.from("request-images").upload(path, sized.blob);
   if (error) throw error;
-  const { data } = supabase.storage.from("request-images").getPublicUrl(path);
-  return { url: data.publicUrl, width, height };
+  return supabase.storage.from("request-images").getPublicUrl(path).data.publicUrl;
+}
+
+// Returns { url, thumb_url, width, height } — dimensions are the full
+// image's, stored alongside the post so the feed can reserve exact space
+// before the bytes arrive. thumb_url is a ~480px version for the feed,
+// trending strip, profile grid and search — those grids were pulling the
+// full-size original for every card on every view, which is what actually
+// exhausted the project's egress quota.
+async function uploadRequestImage(user, file) {
+  if (!file) return { url: "", thumb_url: "", width: null, height: null };
+  const { full, thumb } = await prepareImageWithThumbnail(file);
+  const [url, thumb_url] = await Promise.all([
+    uploadSizedImage(user, full, ""),
+    uploadSizedImage(user, thumb, "thumb/"),
+  ]);
+  return { url, thumb_url, width: full.width, height: full.height };
 }
 
 // No forced crop/aspect-ratio any more — people post whatever shape photo
@@ -606,9 +617,9 @@ async function initNewRequestPanel() {
         return;
       }
 
-      let image_url = "", image_width = null, image_height = null;
+      let image_url = "", thumb_url = "", image_width = null, image_height = null;
       try {
-        ({ url: image_url, width: image_width, height: image_height } = await uploadRequestImage(user, imageFile));
+        ({ url: image_url, thumb_url, width: image_width, height: image_height } = await uploadRequestImage(user, imageFile));
       } catch (err) {
         alert("Couldn't upload image: " + err.message);
         return;
@@ -616,7 +627,7 @@ async function initNewRequestPanel() {
 
       const { error } = await supabase.from("requests").insert({
         user_id: user.id,
-        title, description, budget, category, audience, image_url, spotify_url,
+        title, description, budget, category, audience, image_url, thumb_url, spotify_url,
         image_width, image_height
       });
 

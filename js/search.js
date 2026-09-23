@@ -78,7 +78,7 @@ function openSearchOverlay() {
         .limit(6),
       supabase
         .from("requests")
-        .select("id, title, description, category, image_url, found_recommendation_id, profiles!requests_user_id_fkey(username)")
+        .select("id, title, description, category, image_url, thumb_url, found_recommendation_id, profiles!requests_user_id_fkey(username)")
         .or(`title.ilike.${pattern},description.ilike.${pattern},category.ilike.${pattern}`)
         .order("created_at", { ascending: false })
         .limit(12)
@@ -118,7 +118,7 @@ function openSearchOverlay() {
           ${postRows.map(r => `
             <a class="search-post" href="request.html#${r.id}">
               ${r.image_url
-                ? `<img src="${r.image_url}" alt="" loading="lazy" decoding="async">`
+                ? `<img src="${r.thumb_url || r.image_url}" alt="" loading="lazy" decoding="async">`
                 : `<span class="search-post-text">${searchEscape((r.title || r.description || "").slice(0, 80))}</span>`}
               <span class="search-post-meta">
                 ${r.found_recommendation_id ? `<span class="found-badge">Found</span>` : ""}

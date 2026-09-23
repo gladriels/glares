@@ -342,7 +342,7 @@ async function loadRecommendations() {
   const [{ data: recs, error }, user, profile] = await Promise.all([
     supabase
       .from("recommendations")
-      .select("id, note, link, image_url, image_width, image_height, is_favorite, created_at, user_id, profiles(username, avatar_url)")
+      .select("id, note, link, image_url, thumb_url, image_width, image_height, is_favorite, created_at, user_id, profiles(username, avatar_url)")
       .eq("request_id", requestId)
       .order("is_favorite", { ascending: false })
       .order("created_at", { ascending: false }),
@@ -374,7 +374,7 @@ async function loadRecommendations() {
   list.innerHTML = recs.map(rec => `
     <div class="rec-card ${helped(rec) ? "is-favorite" : ""}">
       ${helped(rec) ? `<span class="rec-favorite-badge">${ICONS.check} This helped</span>` : ""}
-      ${rec.image_url ? `<div class="rec-image"><img src="${rec.image_url}" alt=""${rec.image_width && rec.image_height ? ` width="${rec.image_width}" height="${rec.image_height}"` : ""} loading="lazy" decoding="async"></div>` : ""}
+      ${rec.image_url ? `<div class="rec-image"><img src="${rec.thumb_url || rec.image_url}" alt=""${rec.image_width && rec.image_height ? ` width="${rec.image_width}" height="${rec.image_height}"` : ""} loading="lazy" decoding="async"></div>` : ""}
       <p class="rec-note">${escapeHtml(rec.note)}</p>
       ${rec.link ? `<a class="rec-link" href="${escapeHtml(rec.link)}" target="_blank" rel="noopener">${escapeHtml(rec.link)}</a>` : ""}
       <div class="rec-footer">
@@ -418,15 +418,21 @@ async function loadRecommendations() {
   requestAnimationFrame(() => revealOnScroll(".rec-card"));
 }
 
-// Returns { url, width, height } — see uploadRequestImage in app.js.
+// Returns { url, thumb_url, width, height } — see uploadRequestImage in app.js.
 async function uploadRecImage(user, file) {
-  if (!file) return { url: "", width: null, height: null };
-  const { blob, width, height, name } = await prepareImageForUpload(file);
-  const path = `${user.id}/${Date.now()}-${name.replace(/[^a-zA-Z0-9.]/g, "_")}`;
-  const { error } = await supabase.storage.from("request-images").upload(path, blob);
-  if (error) throw error;
-  const { data } = supabase.storage.from("request-images").getPublicUrl(path);
-  return { url: data.publicUrl, width, height };
+  if (!file) return { url: "", thumb_url: "", width: null, height: null };
+  const { full, thumb } = await prepareImageWithThumbnail(file);
+  const fullPath = `${user.id}/${Date.now()}-${full.name.replace(/[^a-zA-Z0-9.]/g, "_")}`;
+  const thumbPath = `${user.id}/thumb/${Date.now()}-${thumb.name.replace(/[^a-zA-Z0-9.]/g, "_")}`;
+  const [fullUp, thumbUp] = await Promise.all([
+    supabase.storage.from("request-images").upload(fullPath, full.blob),
+    supabase.storage.from("request-images").upload(thumbPath, thumb.blob),
+  ]);
+  if (fullUp.error) throw fullUp.error;
+  if (thumbUp.error) throw thumbUp.error;
+  const url = supabase.storage.from("request-images").getPublicUrl(fullPath).data.publicUrl;
+  const thumb_url = supabase.storage.from("request-images").getPublicUrl(thumbPath).data.publicUrl;
+  return { url, thumb_url, width: full.width, height: full.height };
 }
 
 // No forced crop/aspect-ratio — just a minimum size so tiny images don't
@@ -500,9 +506,9 @@ async function initRecForm() {
       const link = applyAffiliateTag(document.getElementById("rec-link").value.trim());
       const file = document.getElementById("rec-image-file").files[0];
 
-      let image_url = "", image_width = null, image_height = null;
+      let image_url = "", thumb_url = "", image_width = null, image_height = null;
       try {
-        ({ url: image_url, width: image_width, height: image_height } = await uploadRecImage(user, file));
+        ({ url: image_url, thumb_url, width: image_width, height: image_height } = await uploadRecImage(user, file));
       } catch (err) {
         alert("Couldn't upload image: " + err.message);
         return;
@@ -511,7 +517,7 @@ async function initRecForm() {
       const { error } = await supabase.from("recommendations").insert({
         request_id: requestId,
         user_id: user.id,
-        note, link, image_url, image_width, image_height
+        note, link, image_url, thumb_url, image_width, image_height
       });
 
       if (error) {

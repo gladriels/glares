@@ -18,7 +18,7 @@ async function loadStoreGrid() {
   const grid = document.getElementById("store-grid");
 
   const [{ data: products, error }, profile] = await Promise.all([
-    supabase.from("products").select("id, name, price_mnt, image_url, stock_count, is_active")
+    supabase.from("products").select("id, name, price_mnt, image_url, thumb_url, stock_count, is_active")
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: false }),
     getMyProfile()
@@ -47,7 +47,7 @@ async function loadStoreGrid() {
     return `
     <a href="store-item.html#${p.id}" class="product-card">
       <div class="product-card-image">
-        ${p.image_url ? `<img src="${p.image_url}" alt="${escapeHtml(p.name)}" loading="lazy" decoding="async">` : ""}
+        ${p.image_url ? `<img src="${p.thumb_url || p.image_url}" alt="${escapeHtml(p.name)}" loading="lazy" decoding="async">` : ""}
         ${soldOut ? `<div class="product-card-soldout">Sold out</div>` : ""}
         ${isAdmin && !p.is_active ? `<div class="product-card-soldout">Hidden</div>` : ""}
       </div>
@@ -102,23 +102,28 @@ function initAddProductPanel() {
       if (!file) { alert("Add a photo."); return; }
       if (!name || !price_mnt) { alert("Name and price are required."); return; }
 
-      let image_url = "", image_width = null, image_height = null;
+      let image_url = "", thumb_url = "", image_width = null, image_height = null;
       try {
-        const uploaded = await prepareImageForUpload(file);
-        const path = `products/${Date.now()}-${uploaded.name.replace(/[^a-zA-Z0-9.]/g, "_")}`;
-        const { error: uploadError } = await supabase.storage.from("request-images").upload(path, uploaded.blob);
-        if (uploadError) throw uploadError;
-        const { data } = supabase.storage.from("request-images").getPublicUrl(path);
-        image_url = data.publicUrl;
-        image_width = uploaded.width;
-        image_height = uploaded.height;
+        const { full, thumb } = await prepareImageWithThumbnail(file);
+        const fullPath = `products/${Date.now()}-${full.name.replace(/[^a-zA-Z0-9.]/g, "_")}`;
+        const thumbPath = `products/thumb/${Date.now()}-${thumb.name.replace(/[^a-zA-Z0-9.]/g, "_")}`;
+        const [fullUp, thumbUp] = await Promise.all([
+          supabase.storage.from("request-images").upload(fullPath, full.blob),
+          supabase.storage.from("request-images").upload(thumbPath, thumb.blob),
+        ]);
+        if (fullUp.error) throw fullUp.error;
+        if (thumbUp.error) throw thumbUp.error;
+        image_url = supabase.storage.from("request-images").getPublicUrl(fullPath).data.publicUrl;
+        thumb_url = supabase.storage.from("request-images").getPublicUrl(thumbPath).data.publicUrl;
+        image_width = full.width;
+        image_height = full.height;
       } catch (err) {
         alert("Couldn't upload the photo: " + err.message);
         return;
       }
 
       const { error } = await supabase.from("products").insert({
-        name, description, price_mnt, stock_count, sizes, image_url, image_width, image_height
+        name, description, price_mnt, stock_count, sizes, image_url, thumb_url, image_width, image_height
       });
       if (error) { alert("Couldn't add product: " + error.message); return; }
 
